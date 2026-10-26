@@ -1,0 +1,20 @@
+{
+  "name": "assetic-en-fighter",
+  "base": "https://tanvirpersonal.github.io/assetic-en-fighter/",
+  "assets": {
+    "gallinera_table": {
+      "type": "model",
+      "format": "glTF 2.0",
+      "variants": {
+        "2k": "models/gallinera_table/gallinera_table_2k.gltf",
+        "4k": "models/gallinera_table/gallinera_table_4k.gltf"
+      },
+      "nodes": ["gallinera_table", "gallinera_table_door_a", "gallinera_table_door_b"],
+      "units": "metres",
+      "origin": "centre of the base, resting on y = 0",
+      "size": { "x": 0.83, "y": 0.488, "z": 0.518 },
+      "triangles": 5528,
+      "doors": "door_a and door_b slide along x (about 0.2 m) and sit inside the body, so slide them to open"
+    }
+  }
+}

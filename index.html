@@ -89,7 +89,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-const MODEL_URL = './gallinera_table.gltf';
+// ?q=4k loads the 4096px textures (about 16 MB); the default is the 2048px set (about 2 MB).
+const QUALITY = new URLSearchParams(location.search).get('q') === '4k' ? '4k' : '2k';
+const MODEL_URL = `./models/gallinera_table/gallinera_table_${QUALITY}.gltf`;
 
 const $ = (id) => document.getElementById(id);
 const loadingEl = $('loading');
@@ -214,7 +216,7 @@ loader.load(
     controls.update();
 
     const tris = meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3, 0);
-    info.innerHTML = `<b>${(size.x * 100).toFixed(0)} × ${(size.y * 100).toFixed(0)} × ${(size.z * 100).toFixed(0)}</b> cm<br>${Math.round(tris).toLocaleString()} triangles · ${meshes.length} meshes`;
+    info.innerHTML = `<b>${(size.x * 100).toFixed(0)} × ${(size.y * 100).toFixed(0)} × ${(size.z * 100).toFixed(0)}</b> cm<br>${Math.round(tris).toLocaleString()} triangles · ${meshes.length} meshes · ${QUALITY.toUpperCase()} textures`;
 
     bar.style.width = '100%';
     loadingEl.classList.add('done');
@@ -226,7 +228,7 @@ loader.load(
   (err) => {
     console.error(err);
     showError('Could not load the model.\n\n' + (err && err.message ? err.message : err) +
-      '\n\nCheck that gallinera_table.gltf, gallinera_table.bin and the textures/ folder sit next to index.html.');
+      '\n\nCheck that the models/ folder sits next to index.html.');
   }
 );
 

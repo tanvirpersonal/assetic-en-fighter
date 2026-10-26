@@ -108,17 +108,17 @@
     {
       "mimeType": "image/jpeg",
       "name": "gallinera_table_nor_gl",
-      "uri": "textures/gallinera_table_nor_gl_4k.jpg"
+      "uri": "textures/4k/gallinera_table_nor_gl_4k.jpg"
     },
     {
       "mimeType": "image/jpeg",
       "name": "gallinera_table_diff",
-      "uri": "textures/gallinera_table_diff_4k.jpg"
+      "uri": "textures/4k/gallinera_table_diff_4k.jpg"
     },
     {
       "mimeType": "image/jpeg",
       "name": "gallinera_table_rough",
-      "uri": "textures/gallinera_table_arm_4k.jpg"
+      "uri": "textures/4k/gallinera_table_arm_4k.jpg"
     }
   ],
   "accessors": [
@@ -133,7 +133,7 @@
       ],
       "min": [
         -0.4150412380695343,
-        -7.450580596923828e-9,
+        -7.450580596923828e-09,
         -0.2591458559036255
       ],
       "type": "VEC3"
