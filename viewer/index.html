@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gallinera Table Viewer</title>
+<style>
+  :root {
+    --bg: #14171a;
+    --panel: rgba(20, 23, 26, 0.78);
+    --line: rgba(255, 255, 255, 0.12);
+    --text: #e9ecef;
+    --muted: #9aa4ad;
+    --accent: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+  #title { top: max(16px, env(safe-area-inset-top)); left: 16px; padding: 10px 14px; }
+  #title h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+  #title p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+
+  #controls { left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    display: flex; gap: 6px; padding: 6px; max-width: calc(100vw - 24px); overflow-x: auto; }
+  #controls button { appearance: none; border: 0; background: transparent; color: var(--text);
+    padding: 9px 14px; border-radius: 8px; font: inherit; cursor: pointer; white-space: nowrap;
+    min-height: 40px; }
+  #controls button:hover { background: rgba(255,255,255,.08); }
+  #controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #controls button[aria-pressed="true"] { background: var(--accent); color: #1b1500; font-weight: 600; }
+
+  #info { top: max(16px, env(safe-area-inset-top)); right: 16px; padding: 10px 14px; text-align: right;
+    font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  #info b { color: var(--text); font-weight: 600; }
+
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg);
+    transition: opacity .4s ease; z-index: 5; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .box { width: min(320px, 80vw); text-align: center; }
+  #loading .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 14px; }
+  #loading .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  #loading .msg { color: var(--muted); font-size: 13px; }
+  #loading.error .msg { color: #ff8a80; white-space: pre-wrap; text-align: left; }
+  #loading.error .bar { display: none; }
+
+  @media (max-width: 520px) {
+    #info { top: auto; bottom: 76px; right: 16px; left: 16px; text-align: center; }
+  }
+  @media (prefers-reduced-motion: reduce) { #loading { transition: none; } }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="3D view of the Gallinera table. Drag to rotate, scroll to zoom."></canvas>
+
+<div id="title" class="panel">
+  <h1>Gallinera Table</h1>
+  <p>Drag to orbit · scroll or pinch to zoom · right-drag to pan</p>
+</div>
+
+<div id="info" class="panel" aria-live="polite">Loading…</div>
+
+<div id="controls" class="panel" role="toolbar" aria-label="Viewer controls">
+  <button id="btnSpin" aria-pressed="true">Auto-rotate</button>
+  <button id="btnDoors" aria-pressed="false">Slide doors</button>
+  <button id="btnWire" aria-pressed="false">Wireframe</button>
+  <button id="btnReset">Reset view</button>
+</div>
+
+<div id="loading"><div class="box">
+  <div class="msg">Loading table…</div>
+  <div class="bar"><i id="bar"></i></div>
+</div></div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "./lib/three.module.js",
+    "three/addons/": "./lib/addons/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const MODEL_URL = './gallinera_table.gltf';
+
+const $ = (id) => document.getElementById(id);
+const loadingEl = $('loading');
+const loadingMsg = loadingEl.querySelector('.msg');
+const bar = $('bar');
+const info = $('info');
+
+function showError(text) {
+  loadingEl.classList.remove('done');
+  loadingEl.classList.add('error');
+  loadingMsg.textContent = text;
+  info.textContent = 'Failed to load';
+}
+
+// Opening index.html straight from disk (file://) blocks the model request, so say so plainly.
+if (location.protocol === 'file:') {
+  showError('This page has to be served over HTTP, not opened as a file.\n\nFrom this folder run:\n  python3 -m http.server 8000\nthen open http://localhost:8000');
+  throw new Error('file:// not supported');
+}
+
+// ---------- renderer / scene ----------
+const canvas = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14171a);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.7;
+
+const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+
+const key = new THREE.DirectionalLight(0xfff1dc, 2.2);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.004;
+scene.add(key, key.target);
+
+// shadow-catching floor that fades into the background
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(3, 64),
+  new THREE.ShadowMaterial({ opacity: 0.35 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.Mesh(
+  new THREE.RingGeometry(0.0, 1.0, 96),
+  new THREE.MeshBasicMaterial({ color: 0x232830, transparent: true, opacity: 0.9 })
+);
+grid.rotation.x = -Math.PI / 2;
+grid.position.y = -0.0005;
+scene.add(grid);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.2;
+controls.maxPolarAngle = Math.PI * 0.495; // stay above the floor
+
+// ---------- load ----------
+let table = null, doorA = null, doorB = null;
+const meshes = [];
+const home = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+
+const loader = new GLTFLoader();
+loader.load(
+  MODEL_URL,
+  (gltf) => {
+    table = gltf.scene;
+    table.traverse((o) => {
+      if (!o.isMesh) return;
+      meshes.push(o);
+      o.castShadow = true;
+      o.receiveShadow = true;
+      const m = o.material;
+      // The ARM texture packs AO (R), roughness (G), metalness (B). glTF only wires G/B, so use R for AO too.
+      if (m.roughnessMap && !m.aoMap) { m.aoMap = m.roughnessMap; m.aoMapIntensity = 1.0; }
+      if (m.map) m.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      if (m.normalMap) m.normalMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    });
+    doorA = table.getObjectByName('gallinera_table_door_a');
+    doorB = table.getObjectByName('gallinera_table_door_b');
+    if (doorA) doorA.userData.home = doorA.position.clone();
+    if (doorB) doorB.userData.home = doorB.position.clone();
+    scene.add(table);
+
+    // frame it
+    const box = new THREE.Box3().setFromObject(table);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const r = Math.max(size.x, size.y, size.z);
+
+    grid.scale.setScalar(r * 1.6);
+    floor.scale.setScalar(r * 0.6);
+    floor.position.y = box.min.y;
+    grid.position.y = box.min.y - r * 0.001;
+
+    key.position.set(center.x + r * 1.2, box.max.y + r * 2.2, center.z + r * 1.0);
+    key.target.position.copy(center);
+    const s = r * 1.3;
+    Object.assign(key.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 0.01, far: r * 6 });
+    key.shadow.camera.updateProjectionMatrix();
+
+    camera.near = r / 100; camera.far = r * 40; camera.updateProjectionMatrix();
+    home.target.copy(center);
+    home.pos.set(center.x + r * 1.25, center.y + r * 0.55, center.z + r * 1.6);
+    camera.position.copy(home.pos);
+    controls.target.copy(home.target);
+    controls.minDistance = r * 0.6;
+    controls.maxDistance = r * 6;
+    controls.update();
+
+    const tris = meshes.reduce((n, m) => n + (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3, 0);
+    info.innerHTML = `<b>${(size.x * 100).toFixed(0)} × ${(size.y * 100).toFixed(0)} × ${(size.z * 100).toFixed(0)}</b> cm<br>${Math.round(tris).toLocaleString()} triangles · ${meshes.length} meshes`;
+
+    bar.style.width = '100%';
+    loadingEl.classList.add('done');
+  },
+  (e) => {
+    if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100).toFixed(0) + '%';
+    else bar.style.width = '60%';
+  },
+  (err) => {
+    console.error(err);
+    showError('Could not load the model.\n\n' + (err && err.message ? err.message : err) +
+      '\n\nCheck that gallinera_table.gltf, gallinera_table.bin and the textures/ folder sit next to index.html.');
+  }
+);
+
+// ---------- UI ----------
+const toggle = (btn, on) => btn.setAttribute('aria-pressed', String(on));
+
+$('btnSpin').addEventListener('click', (e) => {
+  controls.autoRotate = !controls.autoRotate;
+  toggle(e.currentTarget, controls.autoRotate);
+});
+
+let doorsOpen = false, doorT = 0;
+$('btnDoors').addEventListener('click', (e) => {
+  doorsOpen = !doorsOpen;
+  toggle(e.currentTarget, doorsOpen);
+});
+
+let wire = false;
+$('btnWire').addEventListener('click', (e) => {
+  wire = !wire;
+  meshes.forEach((m) => { m.material.wireframe = wire; });
+  toggle(e.currentTarget, wire);
+});
+
+$('btnReset').addEventListener('click', () => {
+  camera.position.copy(home.pos);
+  controls.target.copy(home.target);
+  controls.update();
+});
+
+// stop auto-rotate fighting the user while they drag, resume only if the toggle is on
+let wasSpinning = false;
+controls.addEventListener('start', () => { wasSpinning = controls.autoRotate; controls.autoRotate = false; });
+controls.addEventListener('end', () => { controls.autoRotate = wasSpinning && $('btnSpin').getAttribute('aria-pressed') === 'true'; });
+
+// ---------- loop ----------
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+let last = performance.now();
+const SLIDE = 0.2; // model units (metres)
+function frame() {
+  const now = performance.now();
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+
+  const goal = doorsOpen ? 1 : 0;
+  doorT += (goal - doorT) * Math.min(1, dt * 6);
+  if (doorA && doorB) {
+    doorA.position.x = doorA.userData.home.x + SLIDE * doorT;
+    doorB.position.x = doorB.userData.home.x - SLIDE * doorT;
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
